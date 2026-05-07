@@ -23,9 +23,9 @@ VLLM_API_KEY = os.environ.get("VLLM_API_KEY", "")
 
 MODELS = [
     "gpt-oss-120b",
-    "Qwen3.6-35B-A3B",
-    "Qwen2.5-72B",
-    "Qwen3-32B",
+    "qwen3.6-35b-a3b",
+    "qwen2.5-72b-instruct-hf",
+    "qwen3-32b-hf",
 ]
 
 MODEL_LABELS = [

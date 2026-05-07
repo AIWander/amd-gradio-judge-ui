@@ -1,0 +1,14 @@
+[
+  {"delta": {"role": "assistant", "content": ""}, "delay": 0.2},
+  {"delta": {"content": "Let me check "}, "delay": 0.3},
+  {"delta": {"content": "what tools are available "}, "delay": 0.3},
+  {"delta": {"content": "in the current session.\n\n"}, "delay": 0.3},
+  {"delta": {"tool_calls": [{"index": 0, "id": "call_001", "function": {"name": "workflow:api_list", "arguments": "{}"}}]}, "delay": 0.5},
+  {"delta": {"tool_calls": [{"index": 0, "id": "call_001", "function": {"name": "workflow:api_list", "arguments": ""}}], "tool_result": {"id": "call_001", "content": "[{\"name\": \"httpbin_demo\", \"method\": \"GET\", \"url\": \"https://httpbin.org/anything\"}, {\"name\": \"weather_gov\", \"method\": \"GET\", \"url\": \"https://api.weather.gov/points/26.0,-80.3\"}, {\"name\": \"github_repos\", \"method\": \"GET\", \"url\": \"https://api.github.com/orgs/AIWander/repos\"}]"}}, "delay": 0.8},
+  {"delta": {"content": "I found **3 stored API connectors** in the current session:\n\n"}, "delay": 0.3},
+  {"delta": {"content": "1. **httpbin_demo** — `GET https://httpbin.org/anything`\n"}, "delay": 0.2},
+  {"delta": {"content": "2. **weather_gov** — `GET https://api.weather.gov/points/26.0,-80.3`\n"}, "delay": 0.2},
+  {"delta": {"content": "3. **github_repos** — `GET https://api.github.com/orgs/AIWander/repos`\n\n"}, "delay": 0.2},
+  {"delta": {"content": "These were learned from previous browsing sessions and stored as reusable workflow connectors."}, "delay": 0.3},
+  {"delta": {"content": ""}, "finish_reason": "stop", "delay": 0.2}
+]

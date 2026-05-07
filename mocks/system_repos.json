@@ -1,0 +1,37 @@
+[
+  {
+    "name": "mcp-httpbin-demo",
+    "stargazers_count": 2,
+    "pushed_at": "2026-05-06T14:30:00Z",
+    "created_at": "2026-05-05T10:00:00Z",
+    "html_url": "https://github.com/AIWander/mcp-httpbin-demo"
+  },
+  {
+    "name": "mcp-weather-gov",
+    "stargazers_count": 5,
+    "pushed_at": "2026-05-04T09:15:00Z",
+    "created_at": "2026-05-02T16:00:00Z",
+    "html_url": "https://github.com/AIWander/mcp-weather-gov"
+  },
+  {
+    "name": "mcp-github-repos",
+    "stargazers_count": 8,
+    "pushed_at": "2026-05-03T20:00:00Z",
+    "created_at": "2026-04-28T12:00:00Z",
+    "html_url": "https://github.com/AIWander/mcp-github-repos"
+  },
+  {
+    "name": "mcp-cat-facts",
+    "stargazers_count": 3,
+    "pushed_at": "2026-05-01T11:00:00Z",
+    "created_at": "2026-04-30T08:00:00Z",
+    "html_url": "https://github.com/AIWander/mcp-cat-facts"
+  },
+  {
+    "name": "mcp-jsonplaceholder",
+    "stargazers_count": 1,
+    "pushed_at": "2026-04-29T15:00:00Z",
+    "created_at": "2026-04-29T14:00:00Z",
+    "html_url": "https://github.com/AIWander/mcp-jsonplaceholder"
+  }
+]

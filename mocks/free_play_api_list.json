@@ -1,0 +1,15 @@
+[
+  {"delta": {"role": "assistant", "content": ""}, "delay": 0.2},
+  {"delta": {"content": "I'll query the workflow connector store "}, "delay": 0.3},
+  {"delta": {"content": "to see what APIs I've learned.\n\n"}, "delay": 0.3},
+  {"delta": {"tool_calls": [{"index": 0, "id": "call_101", "function": {"name": "workflow:api_list", "arguments": "{}"}}]}, "delay": 0.5},
+  {"delta": {"tool_calls": [{"index": 0, "id": "call_101", "function": {"name": "workflow:api_list", "arguments": ""}}], "tool_result": {"id": "call_101", "content": "[{\"name\": \"httpbin_demo\", \"method\": \"GET\"}, {\"name\": \"weather_gov\", \"method\": \"GET\"}, {\"name\": \"github_repos\", \"method\": \"GET\"}, {\"name\": \"jsonplaceholder_posts\", \"method\": \"GET\"}, {\"name\": \"cat_facts\", \"method\": \"GET\"}]"}}, "delay": 0.8},
+  {"delta": {"content": "This session I've learned **5 API connectors**:\n\n"}, "delay": 0.3},
+  {"delta": {"content": "1. **httpbin_demo** — General HTTP echo service\n"}, "delay": 0.2},
+  {"delta": {"content": "2. **weather_gov** — NOAA weather data for Pembroke Pines, FL\n"}, "delay": 0.2},
+  {"delta": {"content": "3. **github_repos** — AIWander org repository listing\n"}, "delay": 0.2},
+  {"delta": {"content": "4. **jsonplaceholder_posts** — Mock REST API for testing\n"}, "delay": 0.2},
+  {"delta": {"content": "5. **cat_facts** — Random cat facts API (graduated!)\n\n"}, "delay": 0.2},
+  {"delta": {"content": "Each of these started as a browser observation and was promoted through the lifecycle."}, "delay": 0.3},
+  {"delta": {"content": ""}, "finish_reason": "stop", "delay": 0.2}
+]

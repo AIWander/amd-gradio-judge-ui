@@ -1,0 +1,17 @@
+[
+  {"delta": {"role": "assistant", "content": ""}, "delay": 0.2},
+  {"delta": {"content": "Let me review everything I've learned this session.\n\n"}, "delay": 0.4},
+  {"delta": {"tool_calls": [{"index": 0, "id": "call_b01", "function": {"name": "workflow:api_list", "arguments": "{}"}}]}, "delay": 0.5},
+  {"delta": {"tool_calls": [{"index": 0, "id": "call_b01"}], "tool_result": {"id": "call_b01", "content": "[{\"name\": \"httpbin_demo\", \"method\": \"GET\", \"url\": \"https://httpbin.org/anything\", \"layer\": 3, \"calls\": 14}, {\"name\": \"weather_gov\", \"method\": \"GET\", \"url\": \"https://api.weather.gov/points/26.0,-80.3\", \"layer\": 2, \"calls\": 5}, {\"name\": \"github_repos\", \"method\": \"GET\", \"url\": \"https://api.github.com/orgs/AIWander/repos\", \"layer\": 2, \"calls\": 3}, {\"name\": \"jsonplaceholder_posts\", \"method\": \"GET\", \"url\": \"https://jsonplaceholder.typicode.com/posts\", \"layer\": 1, \"calls\": 1}, {\"name\": \"cat_facts\", \"method\": \"GET\", \"url\": \"https://catfact.ninja/fact\", \"layer\": 1, \"calls\": 1}]"}}, "delay": 1.0},
+  {"delta": {"content": "Here's what I've learned during this session — each of these is a **capability I taught myself** by browsing the web and observing APIs:\n\n"}, "delay": 0.5},
+  {"delta": {"content": "### Graduated (Layer 3)\n"}, "delay": 0.2},
+  {"delta": {"content": "- **httpbin_demo** — I discovered this HTTP echo service, tested it 14 times, and compiled it into a standalone MCP binary. It's now a permanent tool in my toolbox.\n\n"}, "delay": 0.4},
+  {"delta": {"content": "### Validated (Layer 2)\n"}, "delay": 0.2},
+  {"delta": {"content": "- **weather_gov** — I learned to fetch NOAA weather forecasts for South Florida. 5 successful calls so far. Almost ready for graduation.\n"}, "delay": 0.3},
+  {"delta": {"content": "- **github_repos** — I can query the AIWander GitHub organization to see all published MCP servers. Used 3 times.\n\n"}, "delay": 0.3},
+  {"delta": {"content": "### Discovered (Layer 1)\n"}, "delay": 0.2},
+  {"delta": {"content": "- **jsonplaceholder_posts** — A mock REST API I found while exploring. Still needs validation runs.\n"}, "delay": 0.3},
+  {"delta": {"content": "- **cat_facts** — A fun API for random cat facts. Discovered once, not yet validated.\n\n"}, "delay": 0.3},
+  {"delta": {"content": "The key insight: I didn't start with any of these. I **browsed**, **observed**, **stored**, **tested**, and **graduated** them — building my own toolbox from scratch during a single session."}, "delay": 0.5},
+  {"delta": {"content": ""}, "finish_reason": "stop", "delay": 0.2}
+]

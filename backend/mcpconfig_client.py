@@ -40,12 +40,34 @@ _DEFAULT_120B = "http://127.0.0.1:8001"
 _DEFAULT_20B = "http://127.0.0.1:8002"
 _MCPCONFIG_URL = os.environ.get("MCPCONFIG_URL", "http://127.0.0.1:8003").rstrip("/")
 
+# Full demo surface — curated for context-budget fit (gpt-oss models @ 16k context).
+# Picks the "interesting" tools across hands (browser) + workflow (APIs/creds/2FA/flows) +
+# graduated MCP servers (one tool per binary). ~37 tool definitions ~5-7k tokens of schema.
 DEFAULT_TOOL_FILTER = [
-    "api_list", "api_call",
-    "credential_list",
-    "browser_navigate", "browser_get_text", "browser_extract_content",
-    "browser_click", "browser_type",
+    # Browser (hands) -- DOM + a11y + screenshots -- 15
+    "browser_attach", "browser_navigate", "browser_back", "browser_forward", "browser_reload",
+    "browser_get_text", "browser_get_html", "browser_extract_content",
+    "browser_click", "browser_type", "browser_press", "browser_select",
+    "browser_screenshot", "browser_a11y_snapshot", "browser_scroll",
+    # Workflow APIs -- discovery + replay + graduation lifecycle -- 8
+    "api_store", "api_call", "api_list", "api_test", "api_call_paginated",
+    "api_pending_graduation", "api_graduate", "api_invocation_stats",
+    # Workflow credentials -- 4
+    "credential_store", "credential_list", "credential_get", "credential_delete",
+    # Workflow TOTP / 2FA -- 3
+    "totp_register", "totp_register_from_uri", "totp_generate",
+    # Workflow flows (record + replay) -- 4
+    "flow_record_start", "flow_record_step", "flow_record_stop", "flow_replay",
+    # Workflow data shaping -- 1
+    "transform_pipe",
+    # Graduated MCP servers -- exposed by their binary names -- 1+
+    # workflow:api_graduate produces standalone Rust MCP servers, each exposing
+    # a single tool whose name is the original API name (snake_case).
+    "httpbin_typed_demo",
 ]
+
+# MCP servers to spawn for each /run by default. Includes graduated binaries.
+DEFAULT_MCP_SERVERS = ["workflow", "hands", "httpbin_typed_demo"]
 
 
 def _vllm_url(route: str) -> str:
@@ -101,7 +123,7 @@ async def _stream_via_mcpconfig(
             "model": model,
             "user_prompt": user_prompt,
             "max_iterations": max_iterations,
-            "mcp_servers": mcp_servers or ["workflow", "hands"],
+            "mcp_servers": mcp_servers or DEFAULT_MCP_SERVERS,
             "tool_filter": tool_filter or DEFAULT_TOOL_FILTER,
         },
     }

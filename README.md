@@ -27,14 +27,25 @@ python app.py
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MCPCONFIG_URL` | mcpconfig server base URL (e.g. `http://<ip>:8003/v1`) | *(empty)* |
-| `VLLM_BASE_URL` | vLLM 120b instance (e.g. `http://<ip>:8001`) | *(empty)* |
-| `VLLM_BASE_URL_8002` | vLLM gpt-oss-20b instance | *(empty)* |
+| `JUDGE_BACKEND` | Agent-loop backend: `mcpconfig` (Rust, port 8003), `runner` (Python), or `auto` (mcpconfig with runner fallback) | `mcpconfig` |
+| `MCPCONFIG_URL` | Rust mcpconfig server base URL | `http://127.0.0.1:8003` |
+| `VLLM_BASE_URL` | vLLM 120b instance (e.g. `http://<ip>:8001`) | `http://127.0.0.1:8001` |
+| `VLLM_BASE_URL_8002` | vLLM gpt-oss-20b instance | `http://127.0.0.1:8002` |
 | `MOCK_MODE` | `true` = use scripted fixtures, `false` = real backend | `true` |
 | `GITHUB_ORG` | GitHub org for graduated repos lookup | `AIWander` |
 | `GITHUB_TOKEN` | Optional GitHub PAT (raises API rate limit) | *(empty)* |
 
-When `MOCK_MODE=true` (default) or `MCPCONFIG_URL` is empty, all tabs use scripted fixtures from `mocks/` with realistic streaming timing.
+### Backend Selection
+
+Free Play chat routes through one of two independent agent loops:
+
+- **`mcpconfig`** (default) — Rust agent loop (`mcpconfig /run` SSE on port 8003). Requires `--tool-call-parser openai` on vLLM.
+- **`runner`** — Python agent loop (`backend/runner.py`) driving MCP servers via stdio + vLLM `/v1/responses`.
+- **`auto`** — tries mcpconfig first; falls back to runner on connect error.
+
+Both produce identical canonical event shapes. The UI (`tabs/free_play.py`) is backend-agnostic.
+
+When `MOCK_MODE=true` (default), all tabs use scripted fixtures from `mocks/` with realistic streaming timing regardless of `JUDGE_BACKEND`.
 
 ## Tabs
 

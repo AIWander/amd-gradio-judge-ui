@@ -1,14 +1,23 @@
 """Client for chat streaming.
 
-In LIVE mode, tool-using turns go through backend.runner which drives MCP
-servers directly via stdio and calls vLLM's /v1/responses (Harmony-native)
-endpoint. Non-tool turns (coordinator classifier) still use /v1/chat/completions.
+Routes Free Play chat through one of two backends:
+
+  1. **mcpconfig** (default) — Rust agent loop on port 8003 (/run SSE endpoint).
+     End-to-end verified with --tool-call-parser openai on vLLM 0.11.2.
+  2. **runner** — Python agent loop (backend/runner.py) driving MCP servers via
+     stdio + vLLM /v1/responses.  Kept as fallback.
+
+Select via env var JUDGE_BACKEND: "mcpconfig" | "runner" | "auto" (try mcpconfig, fall back to runner).
+
+Non-tool turns (coordinator classifier) still use /v1/chat/completions directly.
 
   • port 8001 → openai/gpt-oss-120b   (deep-reasoning route)
   • port 8002 → openai/gpt-oss-20b    (fast/exec route)
+  • port 8003 → mcpconfig /run         (Rust agent loop)
 """
 
 import json
+import logging
 import os
 import time
 from typing import AsyncGenerator
@@ -19,11 +28,24 @@ from .coordinator import classify_intent
 from .mock import is_mock_mode, mock_stream_chat, mock_stream_coordinated
 from .runner import run as runner_run
 
+logger = logging.getLogger(__name__)
+
+# ── Backend selector ──────────────────────────────────────────────────
+
+_BACKEND = os.environ.get("JUDGE_BACKEND", "mcpconfig").strip().lower()
 
 # ── URL resolution ────────────────────────────────────────────────────
 
 _DEFAULT_120B = "http://127.0.0.1:8001"
 _DEFAULT_20B = "http://127.0.0.1:8002"
+_MCPCONFIG_URL = os.environ.get("MCPCONFIG_URL", "http://127.0.0.1:8003").rstrip("/")
+
+DEFAULT_TOOL_FILTER = [
+    "api_list", "api_call",
+    "credential_list",
+    "browser_navigate", "browser_get_text", "browser_extract_content",
+    "browser_click", "browser_type",
+]
 
 
 def _vllm_url(route: str) -> str:
@@ -50,7 +72,150 @@ def _model_id(route: str) -> str:
     return "openai/gpt-oss-120b" if route == "120b" else "openai/gpt-oss-20b"
 
 
+# ── Rust mcpconfig SSE streaming ──────────────────────────────────────
+
+
+async def _stream_via_mcpconfig(
+    model: str,
+    user_prompt: str,
+    history: list[dict] | None = None,
+    mcp_servers: list[str] | None = None,
+    tool_filter: list[str] | None = None,
+    max_iterations: int = 6,
+) -> AsyncGenerator[dict, None]:
+    """Stream events from Rust mcpconfig /run endpoint (SSE).
+
+    Yields dicts with a ``kind`` key matching the canonical event shapes
+    (run_start, tools_registered, llm_request, llm_response, tool_call,
+    tool_result, final_answer, run_end, error).
+
+    Raises httpx.ConnectError / httpx.RequestError on connect failure so
+    the caller can fall back to runner.
+    """
+    # TODO: mcpconfig /run accepts a single user_prompt — multi-turn history
+    # is not yet supported. For now we send only the latest user message.
+    body = {
+        "model": model,
+        "task": {
+            "name": "chat",
+            "model": model,
+            "user_prompt": user_prompt,
+            "max_iterations": max_iterations,
+            "mcp_servers": mcp_servers or ["workflow", "hands"],
+            "tool_filter": tool_filter or DEFAULT_TOOL_FILTER,
+        },
+    }
+
+    timeout = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        async with client.stream(
+            "POST",
+            f"{_MCPCONFIG_URL}/run",
+            json=body,
+            headers={"Accept": "text/event-stream"},
+        ) as resp:
+            resp.raise_for_status()
+
+            event_type: str | None = None
+            data_buf: list[str] = []
+
+            async for line in resp.aiter_lines():
+                if line.startswith("event:"):
+                    event_type = line[len("event:"):].strip()
+                elif line.startswith("data:"):
+                    data_buf.append(line[len("data:"):].strip())
+                elif line == "":
+                    # Blank line = end of SSE frame
+                    if event_type and data_buf:
+                        raw = "\n".join(data_buf)
+                        try:
+                            parsed = json.loads(raw)
+                        except json.JSONDecodeError:
+                            parsed = {"kind": event_type, "raw": raw}
+                        # Ensure kind is set (mcpconfig already sends it,
+                        # but belt-and-suspenders)
+                        if "kind" not in parsed:
+                            parsed["kind"] = event_type
+                        yield parsed
+                    event_type = None
+                    data_buf = []
+
+
 # ── Single-model streaming (Coordination = Off) ───────────────────────
+
+
+def _canonical_event_source(
+    backend: str,
+    model: str,
+    prompt: str,
+    history: list[dict] | None,
+    mcp_servers: list[str],
+    tool_filter: list[str],
+) -> AsyncGenerator[dict, None]:
+    """Return the right canonical-event async generator based on backend."""
+    if backend == "runner":
+        return runner_run(
+            model=model,
+            user_prompt=prompt,
+            history=history,
+            mcp_servers=mcp_servers,
+            tool_filter=tool_filter,
+        )
+    # "mcpconfig" or first leg of "auto"
+    return _stream_via_mcpconfig(
+        model=model,
+        user_prompt=prompt,
+        history=history,
+        mcp_servers=mcp_servers,
+        tool_filter=tool_filter,
+    )
+
+
+def _translate_canonical_to_delta(event: dict):
+    """Translate a single canonical event dict to the delta-shaped dict
+    that tabs/free_play.py expects.  Returns a list of 0-2 dicts."""
+    kind = event.get("kind", "")
+    out: list[dict] = []
+
+    if kind == "llm_response":
+        content = event.get("content") or event.get("reasoning") or ""
+        if content:
+            out.append({"delta": {"content": content}})
+
+    elif kind == "tool_call":
+        out.append({
+            "delta": {
+                "tool_calls": [{
+                    "function": {
+                        "name": event.get("name", ""),
+                        "arguments": event.get("arguments", ""),
+                    }
+                }]
+            }
+        })
+
+    elif kind == "tool_result":
+        out.append({
+            "delta": {
+                "tool_result": {
+                    "content": event.get("content", ""),
+                }
+            }
+        })
+
+    elif kind == "final_answer":
+        content = event.get("content", "")
+        if content:
+            out.append({"delta": {"content": content}})
+        out.append({"delta": {}, "finish_reason": "stop"})
+
+    elif kind == "run_end" and not event.get("ok"):
+        out.append({
+            "delta": {"content": f"**Error:** {event.get('error', 'unknown')}"},
+            "finish_reason": "error",
+        })
+
+    return out
 
 
 async def stream_chat(
@@ -58,9 +223,10 @@ async def stream_chat(
 ) -> AsyncGenerator[dict, None]:
     """Stream chat from the 120B model with MCP tool support.
 
-    In LIVE mode, routes through runner.run() which calls /v1/responses and
-    drives MCP servers directly. Translates canonical events back to the
-    delta-shaped dicts that tabs/free_play.py expects.
+    Backend is selected by JUDGE_BACKEND env var:
+      - "mcpconfig" (default): Rust agent loop on port 8003
+      - "runner": Python agent loop (backend/runner.py)
+      - "auto": try mcpconfig first, fall back to runner on connect error
     In mock mode, replays scripted fixtures.
     """
     if is_mock_mode():
@@ -68,53 +234,36 @@ async def stream_chat(
             yield event
         return
 
+    backend = _BACKEND
+    mcp_servers = ["workflow", "hands"]
+    tool_filter = DEFAULT_TOOL_FILTER
+
     try:
-        async for event in runner_run(
-            model="gpt-oss-120b",
-            user_prompt=prompt,
-            history=history,
-            mcp_servers=["workflow", "hands"],
-            tool_filter=["api_list", "api_call", "credential_list"],
-        ):
-            kind = event.get("kind", "")
+        source = _canonical_event_source(
+            backend if backend != "auto" else "mcpconfig",
+            "gpt-oss-120b", prompt, history, mcp_servers, tool_filter,
+        )
+        async for event in source:
+            for out in _translate_canonical_to_delta(event):
+                yield out
 
-            if kind == "llm_response":
-                content = event.get("content") or event.get("reasoning") or ""
-                if content:
-                    yield {"delta": {"content": content}}
-
-            elif kind == "tool_call":
-                yield {
-                    "delta": {
-                        "tool_calls": [{
-                            "function": {
-                                "name": event.get("name", ""),
-                                "arguments": event.get("arguments", ""),
-                            }
-                        }]
-                    }
-                }
-
-            elif kind == "tool_result":
-                yield {
-                    "delta": {
-                        "tool_result": {
-                            "content": event.get("content", ""),
-                        }
-                    }
-                }
-
-            elif kind == "final_answer":
-                content = event.get("content", "")
-                if content:
-                    yield {"delta": {"content": content}}
-                yield {"delta": {}, "finish_reason": "stop"}
-
-            elif kind == "run_end" and not event.get("ok"):
-                yield {
-                    "delta": {"content": f"**Error:** {event.get('error', 'unknown')}"},
-                    "finish_reason": "error",
-                }
+    except (httpx.ConnectError, httpx.RequestError) as e:
+        if backend == "auto":
+            logger.warning("mcpconfig unreachable (%s), falling back to runner", e)
+            try:
+                async for event in runner_run(
+                    model="gpt-oss-120b",
+                    user_prompt=prompt,
+                    history=history,
+                    mcp_servers=mcp_servers,
+                    tool_filter=tool_filter,
+                ):
+                    for out in _translate_canonical_to_delta(event):
+                        yield out
+            except Exception as e2:
+                yield {"delta": {"content": f"**Error:** {type(e2).__name__}: {e2}"}, "finish_reason": "error"}
+        else:
+            yield {"delta": {"content": f"**Error:** {type(e).__name__}: {e}"}, "finish_reason": "error"}
 
     except Exception as e:
         yield {"delta": {"content": f"**Error:** {type(e).__name__}: {e}"}, "finish_reason": "error"}
@@ -123,10 +272,48 @@ async def stream_chat(
 # ── Coordinated streaming (Coordination = Coordinator (β)) ────────────
 
 
+def _translate_canonical_to_coordinated(event: dict, model_id: str):
+    """Translate a canonical event to the coordinated-mode shape.
+    Returns a list of 0-1 dicts plus an optional total_tokens int."""
+    kind = event.get("kind", "")
+    out: list[dict] = []
+    tokens: int | None = None
+
+    if kind == "llm_response":
+        content = event.get("content") or event.get("reasoning") or ""
+        if content:
+            out.append({"type": "delta", "content": content, "model": model_id})
+
+    elif kind == "tool_call":
+        out.append({
+            "type": "tool_call",
+            "name": event.get("name", ""),
+            "arguments": event.get("arguments", ""),
+        })
+
+    elif kind == "tool_result":
+        out.append({
+            "type": "tool_result",
+            "content": event.get("content", ""),
+        })
+
+    elif kind == "final_answer":
+        content = event.get("content", "")
+        if content:
+            out.append({"type": "delta", "content": content, "model": model_id})
+
+    elif kind == "run_end":
+        tokens = event.get("total_tokens", 0)
+
+    return out, tokens
+
+
 async def stream_chat_coordinated(
     prompt: str, history: list[dict] | None = None
 ) -> AsyncGenerator[dict, None]:
     """Coordinator mode: classify intent with 20B, then run agent loop on chosen model.
+
+    Backend is selected by JUDGE_BACKEND env var (same as stream_chat).
 
     Yields dicts with "type" key:
       {"type":"meta",  "route":"20b|120b", "reason":"PLAN|EXEC", "classifier_ms": int}
@@ -149,42 +336,42 @@ async def stream_chat_coordinated(
     model_id = _model_id(route)
     start = time.monotonic()
     total_tokens = 0
+    backend = _BACKEND
+    mcp_servers = ["workflow", "hands"]
+    tool_filter = DEFAULT_TOOL_FILTER
 
     try:
-        async for event in runner_run(
-            model=model_short,
-            user_prompt=prompt,
-            history=history,
-            mcp_servers=["workflow", "hands"],
-            tool_filter=["api_list", "api_call", "credential_list"],
-        ):
-            kind = event.get("kind", "")
+        source = _canonical_event_source(
+            backend if backend != "auto" else "mcpconfig",
+            model_short, prompt, history, mcp_servers, tool_filter,
+        )
+        async for event in source:
+            items, tokens = _translate_canonical_to_coordinated(event, model_id)
+            for item in items:
+                yield item
+            if tokens is not None:
+                total_tokens = tokens
 
-            if kind == "llm_response":
-                content = event.get("content") or event.get("reasoning") or ""
-                if content:
-                    yield {"type": "delta", "content": content, "model": model_id}
-
-            elif kind == "tool_call":
-                yield {
-                    "type": "tool_call",
-                    "name": event.get("name", ""),
-                    "arguments": event.get("arguments", ""),
-                }
-
-            elif kind == "tool_result":
-                yield {
-                    "type": "tool_result",
-                    "content": event.get("content", ""),
-                }
-
-            elif kind == "final_answer":
-                content = event.get("content", "")
-                if content:
-                    yield {"type": "delta", "content": content, "model": model_id}
-
-            elif kind == "run_end":
-                total_tokens = event.get("total_tokens", 0)
+    except (httpx.ConnectError, httpx.RequestError) as e:
+        if backend == "auto":
+            logger.warning("mcpconfig unreachable (%s), falling back to runner", e)
+            try:
+                async for event in runner_run(
+                    model=model_short,
+                    user_prompt=prompt,
+                    history=history,
+                    mcp_servers=mcp_servers,
+                    tool_filter=tool_filter,
+                ):
+                    items, tokens = _translate_canonical_to_coordinated(event, model_id)
+                    for item in items:
+                        yield item
+                    if tokens is not None:
+                        total_tokens = tokens
+            except Exception as e2:
+                yield {"type": "delta", "content": f"**Error:** {type(e2).__name__}: {e2}", "model": model_id}
+        else:
+            yield {"type": "delta", "content": f"**Error:** {type(e).__name__}: {e}", "model": model_id}
 
     except Exception as e:
         yield {"type": "delta", "content": f"**Error:** {type(e).__name__}: {e}", "model": model_id}

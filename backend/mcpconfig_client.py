@@ -64,10 +64,11 @@ DEFAULT_TOOL_FILTER = [
     # workflow:api_graduate produces standalone Rust MCP servers, each exposing
     # a single tool whose name is the original API name (snake_case).
     "httpbin_typed_demo",
+    "httpbin_post_demo",
 ]
 
 # MCP servers to spawn for each /run by default. Includes graduated binaries.
-DEFAULT_MCP_SERVERS = ["workflow", "hands", "httpbin_typed_demo"]
+DEFAULT_MCP_SERVERS = ["workflow", "hands", "httpbin_typed_demo", "httpbin_post_demo"]
 
 
 def _vllm_url(route: str) -> str:

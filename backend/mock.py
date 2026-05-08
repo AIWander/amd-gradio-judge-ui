@@ -52,6 +52,29 @@ async def mock_stream_chat(prompt: str) -> AsyncGenerator[dict, None]:
         yield event
 
 
+async def mock_stream_coordinated(prompt: str) -> AsyncGenerator[dict, None]:
+    """Replay coordinator-mode fixture events."""
+    path = MOCKS_DIR / "coordinator_routes.json"
+    if not path.exists():
+        yield {"type": "meta", "route": "20b", "reason": "EXEC", "classifier_ms": 50}
+        yield {"type": "delta", "content": "[Mock] No coordinator fixture found.", "model": "gpt-oss-20b"}
+        yield {"type": "done", "total_ms": 100, "total_tokens": 8, "model": "gpt-oss-20b", "route": "20b"}
+        return
+
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    # Route "plan"-like prompts to plan_example, else exec_example
+    plan_re = re.compile(r"step.by.step|analyz|architect|design|complex|trade.?off", re.I)
+    scenario = data.get("plan_example") if plan_re.search(prompt) else data.get("exec_example")
+    if not scenario:
+        scenario = data.get("exec_example", {})
+
+    for event in scenario.get("events", []):
+        await asyncio.sleep(0.3)
+        yield event
+
+
 def mock_vllm_metrics() -> dict:
     path = MOCKS_DIR / "system_metrics.json"
     with open(path, "r", encoding="utf-8") as f:

@@ -1,4 +1,15 @@
-"""Client for mcpconfig /chat/completions endpoint (OpenAI-compatible SSE)."""
+"""Client for chat streaming.
+
+Despite the filename, this no longer talks to mcpconfig — that server's API
+shape (`/run` SSE with custom event kinds) is incompatible with how the chat
+UI wants to consume tokens. We bypass it and call vLLM directly:
+
+  • port 8001 → openai/gpt-oss-120b   (deep-reasoning route)
+  • port 8002 → openai/gpt-oss-20b    (fast/exec route)
+
+vLLM is OpenAI-compatible, exposes `/v1/chat/completions`, and supports SSE
+streaming natively. Restoring tool-calling via mcpconfig `/run` is a follow-up.
+"""
 
 import json
 import os
@@ -11,14 +22,46 @@ from .coordinator import classify_intent
 from .mock import is_mock_mode, mock_stream_chat, mock_stream_coordinated
 
 
-def _get_url() -> str:
-    return os.environ.get("MCPCONFIG_URL", "").strip()
+# ── URL resolution ────────────────────────────────────────────────────
+
+_DEFAULT_120B = "http://127.0.0.1:8001"
+_DEFAULT_20B = "http://127.0.0.1:8002"
 
 
-async def stream_chat(prompt: str, history: list[dict] | None = None) -> AsyncGenerator[dict, None]:
+def _vllm_url(route: str) -> str:
+    """Return base vLLM URL (without /v1) for the given route ('20b' or '120b').
+
+    Env override order (per route):
+      route='120b': VLLM_120B_URL → VLLM_BASE_URL → http://127.0.0.1:8001
+      route='20b':  VLLM_20B_URL  → VLLM_BASE_URL_8002 → http://127.0.0.1:8002
     """
-    Stream chat completions. Each yielded dict has a 'delta' key matching
-    OpenAI SSE format: {content?, tool_calls?, role?}.
+    if route == "120b":
+        return (
+            os.environ.get("VLLM_120B_URL", "").strip()
+            or os.environ.get("VLLM_BASE_URL", "").strip()
+            or _DEFAULT_120B
+        ).rstrip("/")
+    return (
+        os.environ.get("VLLM_20B_URL", "").strip()
+        or os.environ.get("VLLM_BASE_URL_8002", "").strip()
+        or _DEFAULT_20B
+    ).rstrip("/")
+
+
+def _model_id(route: str) -> str:
+    return "openai/gpt-oss-120b" if route == "120b" else "openai/gpt-oss-20b"
+
+
+# ── Single-model streaming (Coordination = Off) ───────────────────────
+
+
+async def stream_chat(
+    prompt: str, history: list[dict] | None = None
+) -> AsyncGenerator[dict, None]:
+    """Stream chat completions from the 120B model directly.
+
+    Yields dicts shaped like OpenAI SSE deltas: {"delta": {...}, "finish_reason"?}
+    so the existing tabs/free_play.py rendering code keeps working unchanged.
     In mock mode, replays scripted fixtures.
     """
     if is_mock_mode():
@@ -26,7 +69,8 @@ async def stream_chat(prompt: str, history: list[dict] | None = None) -> AsyncGe
             yield event
         return
 
-    base_url = _get_url()
+    base_url = _vllm_url("120b")
+    model = _model_id("120b")
     messages = []
     if history:
         for msg in history:
@@ -34,7 +78,7 @@ async def stream_chat(prompt: str, history: list[dict] | None = None) -> AsyncGe
     messages.append({"role": "user", "content": prompt})
 
     payload = {
-        "model": "gpt-oss-120b",
+        "model": model,
         "messages": messages,
         "stream": True,
         "max_tokens": 8192,
@@ -44,7 +88,7 @@ async def stream_chat(prompt: str, history: list[dict] | None = None) -> AsyncGe
         async with httpx.AsyncClient(timeout=300) as client:
             async with client.stream(
                 "POST",
-                f"{base_url}/chat/completions",
+                f"{base_url}/v1/chat/completions",
                 json=payload,
                 headers={"Content-Type": "application/json"},
             ) as response:
@@ -67,7 +111,12 @@ async def stream_chat(prompt: str, history: list[dict] | None = None) -> AsyncGe
                     try:
                         chunk = json.loads(data_str)
                         choice = chunk.get("choices", [{}])[0]
-                        delta = choice.get("delta", {})
+                        delta = choice.get("delta", {}) or {}
+                        # gpt-oss reasoning channel: surface it as content too
+                        # so the chatbot shows something while the model thinks.
+                        if not delta.get("content") and delta.get("reasoning_content"):
+                            delta = dict(delta)
+                            delta["content"] = delta["reasoning_content"]
                         finish = choice.get("finish_reason")
                         event = {"delta": delta}
                         if finish:
@@ -77,11 +126,14 @@ async def stream_chat(prompt: str, history: list[dict] | None = None) -> AsyncGe
                         continue
 
     except httpx.ConnectError:
-        yield {"delta": {"content": "**Backend unreachable** — cannot connect to mcpconfig."}, "finish_reason": "error"}
+        yield {"delta": {"content": "**Backend unreachable** — cannot connect to vLLM 120B."}, "finish_reason": "error"}
     except httpx.ReadTimeout:
         yield {"delta": {"content": "**Timeout** — request exceeded 5 minutes."}, "finish_reason": "error"}
     except Exception as e:
         yield {"delta": {"content": f"**Error:** {type(e).__name__}: {e}"}, "finish_reason": "error"}
+
+
+# ── Coordinated streaming (Coordination = Coordinator (β)) ────────────
 
 
 async def stream_chat_coordinated(
@@ -90,22 +142,22 @@ async def stream_chat_coordinated(
     """Coordinator mode: classify intent with 20B, then stream from chosen model.
 
     Yields dicts with "type" key:
-      {"type":"meta", "route":"20b|120b", "reason":"PLAN|EXEC", "classifier_ms": int}
+      {"type":"meta",  "route":"20b|120b", "reason":"PLAN|EXEC", "classifier_ms": int}
       {"type":"delta", "content":"...", "model":"..."}
-      {"type":"done", "total_ms": int, "total_tokens": int, "model":"...", "route":"..."}
+      {"type":"done",  "total_ms": int, "total_tokens": int, "model":"...", "route":"..."}
     """
     if is_mock_mode():
         async for event in mock_stream_coordinated(prompt):
             yield event
         return
 
-    # Step 1: Classify
+    # Step 1: Classify (hits vLLM 20B directly via classify_intent)
     route, reason, classifier_ms = await classify_intent(prompt, history)
     yield {"type": "meta", "route": route, "reason": reason, "classifier_ms": classifier_ms}
 
-    # Step 2: Stream from chosen model
-    model = f"gpt-oss-{route}"
-    base_url = _get_url()
+    # Step 2: Stream from the chosen model — direct to its vLLM port.
+    base_url = _vllm_url(route)
+    model = _model_id(route)
     messages = []
     if history:
         for msg in history:
@@ -126,7 +178,7 @@ async def stream_chat_coordinated(
         async with httpx.AsyncClient(timeout=300) as client:
             async with client.stream(
                 "POST",
-                f"{base_url}/chat/completions",
+                f"{base_url}/v1/chat/completions",
                 json=payload,
                 headers={"Content-Type": "application/json"},
             ) as response:
@@ -134,7 +186,11 @@ async def stream_chat_coordinated(
                     error_text = ""
                     async for chunk in response.aiter_text():
                         error_text += chunk
-                    yield {"type": "delta", "content": f"**Error** (HTTP {response.status_code}): {error_text[:300]}", "model": model}
+                    yield {
+                        "type": "delta",
+                        "content": f"**Error** (HTTP {response.status_code}): {error_text[:300]}",
+                        "model": model,
+                    }
                     return
 
                 async for line in response.aiter_lines():
@@ -146,8 +202,11 @@ async def stream_chat_coordinated(
                     try:
                         chunk = json.loads(data_str)
                         choice = chunk.get("choices", [{}])[0]
-                        delta = choice.get("delta", {})
-                        content = delta.get("content", "")
+                        delta = choice.get("delta", {}) or {}
+                        # Prefer content; fall back to reasoning_content so the
+                        # user sees the model thinking even if it doesn't emit
+                        # a final answer in time.
+                        content = delta.get("content") or delta.get("reasoning_content") or ""
                         if content:
                             total_tokens += len(content.split())
                             yield {"type": "delta", "content": content, "model": model}
@@ -158,7 +217,7 @@ async def stream_chat_coordinated(
                         continue
 
     except httpx.ConnectError:
-        yield {"type": "delta", "content": "**Backend unreachable** — cannot connect.", "model": model}
+        yield {"type": "delta", "content": f"**Backend unreachable** — cannot connect to vLLM ({route}).", "model": model}
     except httpx.ReadTimeout:
         yield {"type": "delta", "content": "**Timeout** — request exceeded 5 minutes.", "model": model}
     except Exception as e:

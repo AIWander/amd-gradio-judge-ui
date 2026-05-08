@@ -15,8 +15,19 @@ ROUTER_PROMPT = (
 )
 
 
-def _get_url() -> str:
-    return os.environ.get("MCPCONFIG_URL", "").strip()
+def _classifier_url() -> str:
+    """Return base URL for the 20B classifier (without trailing /v1).
+
+    Resolution order:
+      1. VLLM_20B_URL (e.g. http://127.0.0.1:8002)
+      2. VLLM_BASE_URL_8002
+      3. http://127.0.0.1:8002 (sane default)
+    """
+    return (
+        os.environ.get("VLLM_20B_URL", "").strip()
+        or os.environ.get("VLLM_BASE_URL_8002", "").strip()
+        or "http://127.0.0.1:8002"
+    )
 
 
 async def classify_intent(
@@ -29,33 +40,33 @@ async def classify_intent(
         reason: "PLAN" or "EXEC"
         classifier_ms: wall-clock time in milliseconds
     """
-    base_url = _get_url()
+    base_url = _classifier_url().rstrip("/")
     start = time.monotonic()
 
+    # gpt-oss is a reasoning model: tokens spent in reasoning_content come out
+    # of the same budget as content. Need ~200 tokens to clear the thinking
+    # phase and emit the final PLAN/EXEC verdict.
     payload = {
-        "model": "gpt-oss-20b",
+        "model": "openai/gpt-oss-20b",
         "messages": [{"role": "user", "content": ROUTER_PROMPT.format(prompt=prompt)}],
         "stream": False,
-        "max_tokens": 10,
+        "max_tokens": 256,
         "temperature": 0,
     }
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
-                f"{base_url}/chat/completions",
+                f"{base_url}/v1/chat/completions",
                 json=payload,
                 headers={"Content-Type": "application/json"},
             )
             resp.raise_for_status()
             data = resp.json()
-            text = (
-                data.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-                .strip()
-                .upper()
-            )
+            msg = data.get("choices", [{}])[0].get("message", {}) or {}
+            # Prefer answer channel; fall back to reasoning channel if the
+            # model burned all tokens thinking.
+            text = (msg.get("content") or msg.get("reasoning_content") or "").strip().upper()
     except Exception:
         text = ""
 

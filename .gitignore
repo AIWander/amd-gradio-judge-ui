@@ -7,3 +7,4 @@ dist/
 build/
 flagged/
 _archive_v1/
+*.bak.*

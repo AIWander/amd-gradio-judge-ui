@@ -28,8 +28,7 @@ python app.py
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `MCPCONFIG_URL` | mcpconfig server base URL (e.g. `http://<ip>:8003/v1`) | *(empty)* |
-| `VLLM_BASE_URL` | vLLM 120b instance (e.g. `http://<ip>:8000`) | *(empty)* |
-| `VLLM_BASE_URL_8001` | vLLM qwen3.6-35b-A3B instance | *(empty)* |
+| `VLLM_BASE_URL` | vLLM 120b instance (e.g. `http://<ip>:8001`) | *(empty)* |
 | `VLLM_BASE_URL_8002` | vLLM gpt-oss-20b instance | *(empty)* |
 | `MOCK_MODE` | `true` = use scripted fixtures, `false` = real backend | `true` |
 | `GITHUB_ORG` | GitHub org for graduated repos lookup | `AIWander` |
@@ -59,7 +58,6 @@ git push hf main
 Then set env vars in the Space's Settings > Repository secrets:
 - `MCPCONFIG_URL`
 - `VLLM_BASE_URL`
-- `VLLM_BASE_URL_8001`
 - `VLLM_BASE_URL_8002`
 - `MOCK_MODE=false`
 - `GITHUB_TOKEN` (optional)

@@ -9,7 +9,6 @@ from .mock import is_mock_mode, mock_vllm_metrics
 
 PORTS = {
     "gpt-oss-120b": "VLLM_BASE_URL",
-    "qwen3.6-35b-A3B": "VLLM_BASE_URL_8001",
     "gpt-oss-20b": "VLLM_BASE_URL_8002",
 }
 
@@ -57,7 +56,7 @@ async def get_vllm_metrics() -> dict:
                         metrics.get("vllm:gpu_memory_used_bytes", 0)
                         / max(metrics.get("vllm:gpu_memory_total_bytes", 1), 1) * 100, 1
                     ),
-                    "params_b": {"gpt-oss-120b": 120, "qwen3.6-35b-A3B": 35, "gpt-oss-20b": 20}.get(model_name, 0),
+                    "params_b": {"gpt-oss-120b": 120, "gpt-oss-20b": 20}.get(model_name, 0),
                     "last_activity_ago": "live",
                     "uptime_seconds": metrics.get("vllm:uptime_seconds", 0),
                 })

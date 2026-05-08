@@ -2,23 +2,13 @@
   "models": [
     {
       "name": "gpt-oss-120b",
-      "port": 8000,
+      "port": 8001,
       "gpu_memory_used_bytes": 137438953472,
       "gpu_memory_total_bytes": 205152903168,
       "gpu_utilization_pct": 67.0,
       "params_b": 120,
       "last_activity_ago": "2m ago",
       "uptime_seconds": 86400
-    },
-    {
-      "name": "qwen3.6-35b-A3B",
-      "port": 8001,
-      "gpu_memory_used_bytes": 24696061952,
-      "gpu_memory_total_bytes": 205152903168,
-      "gpu_utilization_pct": 12.0,
-      "params_b": 35,
-      "last_activity_ago": "45s ago",
-      "uptime_seconds": 72000
     },
     {
       "name": "gpt-oss-20b",

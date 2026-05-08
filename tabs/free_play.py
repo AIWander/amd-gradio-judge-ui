@@ -88,6 +88,25 @@ async def _handle_chat(message: str, history: list[dict], coord_mode: str):
                 trace_md = "\n\n".join(trace_lines)
                 yield display_history, trace_md
 
+            elif etype == "tool_call":
+                trace_lines.append(
+                    f"→ **{event.get('name', '')}**({event.get('arguments', '')})"
+                )
+                display_history = history.copy()
+                if assistant_text:
+                    display_history.append({"role": "assistant", "content": assistant_text})
+                yield display_history, "\n\n".join(trace_lines)
+
+            elif etype == "tool_result":
+                preview = event.get("content", "")[:200]
+                if len(event.get("content", "")) > 200:
+                    preview += "..."
+                trace_lines.append(f"← {preview}")
+                display_history = history.copy()
+                if assistant_text:
+                    display_history.append({"role": "assistant", "content": assistant_text})
+                yield display_history, "\n\n".join(trace_lines)
+
             elif etype == "delta":
                 content = event.get("content", "")
                 if content:

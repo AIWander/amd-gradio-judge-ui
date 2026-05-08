@@ -1,0 +1,21 @@
+{
+  "plan_example": {
+    "classify": { "route": "120b", "reason": "PLAN", "classifier_ms": 280 },
+    "events": [
+      { "type": "meta", "route": "120b", "reason": "PLAN", "classifier_ms": 280 },
+      { "type": "delta", "content": "Let me break this down step by step.\n\n", "model": "gpt-oss-120b" },
+      { "type": "delta", "content": "**Step 1:** First, we need to analyze the architecture constraints.\n", "model": "gpt-oss-120b" },
+      { "type": "delta", "content": "**Step 2:** Then we evaluate the trade-offs between latency and throughput.\n\n", "model": "gpt-oss-120b" },
+      { "type": "delta", "content": "Based on this analysis, the optimal approach is to use a pipeline pattern with buffered stages.", "model": "gpt-oss-120b" },
+      { "type": "done", "total_ms": 4500, "total_tokens": 1850, "model": "gpt-oss-120b", "route": "120b" }
+    ]
+  },
+  "exec_example": {
+    "classify": { "route": "20b", "reason": "EXEC", "classifier_ms": 95 },
+    "events": [
+      { "type": "meta", "route": "20b", "reason": "EXEC", "classifier_ms": 95 },
+      { "type": "delta", "content": "The current time is 2026-05-07 14:32 UTC.", "model": "gpt-oss-20b" },
+      { "type": "done", "total_ms": 1200, "total_tokens": 340, "model": "gpt-oss-20b", "route": "20b" }
+    ]
+  }
+}
